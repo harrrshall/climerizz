@@ -1,0 +1,15 @@
+# Existing rules
+.next
+.env.local
+.env.development
+.env.production
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+
+# Add these new rules
+node_modules/
+.DS_Store
