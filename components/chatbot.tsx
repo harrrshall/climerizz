@@ -8,6 +8,7 @@ import Link from 'next/link';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
+
 interface FileType {
   name: string;
   type: string;
@@ -109,7 +110,10 @@ const DocumentAnalysis = () => {
       if (!response.ok) {
         throw new Error(`Network response was not ok: ${response.status} ${response.statusText}`);
       }
-  
+
+      const fileHash = response.headers.get('X-File-Hash');
+      const cacheHit = response.headers.get('X-Cache-Hit');
+
       const reader = response.body?.getReader();
       let accumulatedText = '';
   
@@ -127,15 +131,25 @@ const DocumentAnalysis = () => {
       setIsAnalyzing(false);
       setAnalysisComplete(true);
       setShowResults(true);
+
+      // Only cache if it wasn't a cache hit
+      if (cacheHit === 'false' && fileHash) {
+        await fetch('/api/cache-response', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ fileHash, response: accumulatedText }),
+        });
+      }
       
     } catch (error) {
       console.error('Error during analysis:', error);
       setIsAnalyzing(false);
-      if (error instanceof Error) {
-        toast.error(`something went wrong , please try again `);
-      }
+      toast.error(`Something went wrong, please try again`);
     }
   };
+
 
   const transformResults = (rawResults: Record<string, SafeguardValue>): AnalysisResults => {
     console.log('Transforming raw results:', rawResults);
