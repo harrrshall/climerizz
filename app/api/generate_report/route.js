@@ -1,7 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { VERRA } from './verra.js';
 import { GOLD_STANDARD_DOCUMENT } from './gold_standard.js';
-
 import { MongoClient } from 'mongodb';
 import crypto from 'crypto';
 
@@ -42,7 +41,7 @@ async function generateFileHash(file) {
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-// Cache management functions
+// Check for cached response
 async function getCachedResponse(fileHash) {
     try {
         const client = await getMongoClient();
@@ -57,7 +56,6 @@ async function getCachedResponse(fileHash) {
         });
 
         if (cachedItem) {
-            // Update last accessed time
             await collection.updateOne(
                 { fileHash },
                 { $set: { lastAccessed: new Date() } }
@@ -68,28 +66,6 @@ async function getCachedResponse(fileHash) {
     } catch (error) {
         console.error('Error getting cached response:', error);
         return null;
-    }
-}
-
-async function setCachedResponse(fileHash, response) {
-    try {
-        const client = await getMongoClient();
-        const db = client.db('gemini_cache');
-        const collection = db.collection('responses');
-
-        await collection.updateOne(
-            { fileHash },
-            {
-                $set: {
-                    response,
-                    timestamp: new Date(),
-                    lastAccessed: new Date()
-                }
-            },
-            { upsert: true }
-        );
-    } catch (error) {
-        console.error('Error setting cached response:', error);
     }
 }
 
@@ -105,52 +81,42 @@ async function processFileUpload(file) {
     };
 }
 
-// Main API route handler
 export async function POST(req) {
+    const formData = await req.formData();
+    const file = formData.get('files');
+    const messages = JSON.parse(formData.get('messages'));
+    const latestMessage = messages[messages.length - 1].content;
+    const standard = formData.get('standard');
+
+    if (!file || !standard) {
+        return new Response(
+            JSON.stringify({ error: !file ? 'No file uploaded' : 'Standard not selected' }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+    }
+
+    let DOCUMENT = standard === 'Verra' ? VERRA : (standard === 'Gold_Standard' ? GOLD_STANDARD_DOCUMENT : null);
+    if (!DOCUMENT) {
+        return new Response(
+            JSON.stringify({ error: 'Invalid standard selected' }),
+            { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+    }
 
     try {
-        const formData = await req.formData();
-        const file = formData.get('files');
-        const messages = JSON.parse(formData.get('messages'));
-        const latestMessage = messages[messages.length - 1].content;
-        const standard = formData.get('standard');
-
-        if (!file) {
-            return new Response(
-                JSON.stringify({ error: 'No file uploaded' }),
-                { status: 400, headers: { 'Content-Type': 'application/json' } }
-            );
-        }
-
-        if (!standard) {
-            return new Response(
-                JSON.stringify({ error: 'Standard not selected' }),
-                { status: 400, headers: { 'Content-Type': 'application/json' } }
-            );
-        }
-
-        let DOCUMENT;
-        if (standard === 'Verra') {
-            DOCUMENT = VERRA;
-        } else if (standard === 'Gold_Standard') {
-            DOCUMENT = GOLD_STANDARD_DOCUMENT;
-        } else {
-            return new Response(
-                JSON.stringify({ error: 'Invalid standard selected' }),
-                { status: 400, headers: { 'Content-Type': 'application/json' } }
-            );
-        }
-
         // Generate file hash for cache key
         const fileHash = await generateFileHash(file);
 
         // Check cache
         const cachedResponse = await getCachedResponse(fileHash);
         if (cachedResponse) {
-            return new Response(
-                cachedResponse,
-                { headers: { 'Content-Type': 'application/json' } }
-            );
+            return new Response(cachedResponse, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-File-Hash': fileHash,
+                    'X-Cache-Hit': 'true'
+                }
+            });
         }
 
         // Process file if no cache hit
@@ -252,43 +218,44 @@ export async function POST(req) {
             ],
         });
 
-        // Get streaming response
-        const result = await chatSession.sendMessageStream(latestMessage);
+      // Get streaming response
+      const result = await chatSession.sendMessageStream(latestMessage);
 
-        // Create response stream
-        let fullResponse = '';
-        const stream = new ReadableStream({
-            async start(controller) {
-                try {
-                    for await (const chunk of result.stream) {
-                        const chunkText = chunk.text();
-                        fullResponse += chunkText;
-                        controller.enqueue(chunkText);
-                    }
-                    // Cache the complete response
-                    await setCachedResponse(fileHash, fullResponse);
-                    controller.close();
-                } catch (error) {
-                    controller.error(error);
-                }
-            }
-        });
+      // Create response stream
+      const stream = new ReadableStream({
+          async start(controller) {
+              try {
+                  for await (const chunk of result.stream) {
+                      const chunkText = chunk.text();
+                      controller.enqueue(chunkText);
+                  }
+                  controller.close();
+              } catch (error) {
+                  controller.error(error);
+              }
+          }
+      });
 
-        return new Response(stream, {
-            headers: { 'Content-Type': 'application/json; charset=utf-8' },
-        });
+      // Return the response along with the fileHash
+      return new Response(stream, {
+          headers: { 
+              'Content-Type': 'application/json; charset=utf-8',
+              'X-File-Hash': fileHash,
+              'X-Cache-Hit': 'false'
+          },
+      });
 
-    } catch (error) {
-        console.error('Error in generate_report:', error);
-        return new Response(
-            JSON.stringify({
-                error: 'Internal server error',
-                details: error.message
-            }),
-            {
-                status: 500,
-                headers: { 'Content-Type': 'application/json' },
-            }
-        );
-    }
+  } catch (error) {
+      console.error('Error in generate_report:', error);
+      return new Response(
+          JSON.stringify({
+              error: 'Internal server error',
+              details: error.message
+          }),
+          {
+              status: 500,
+              headers: { 'Content-Type': 'application/json' },
+          }
+      );
+  }
 }
