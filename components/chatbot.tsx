@@ -95,13 +95,12 @@ const DocumentAnalysis = () => {
       toast.error('No files to analyze or standard not selected');
       return;
     }
-
+  
     try {
       const formData = new FormData();
       files.forEach(file => formData.append('files', file as File));
       formData.append('standard', selectedStandard);
-      formData.append('messages', JSON.stringify([{ role: 'user', content: 'Analyze this document for carbon credit project quality.' }]));
-      
+  
       const response = await fetch('/api/generate_report', {
         method: 'POST',
         body: formData,
@@ -110,28 +109,20 @@ const DocumentAnalysis = () => {
       if (!response.ok) {
         throw new Error(`Network response was not ok: ${response.status} ${response.statusText}`);
       }
-
+  
       const fileHash = response.headers.get('X-File-Hash');
       const cacheHit = response.headers.get('X-Cache-Hit');
-
-      const reader = response.body?.getReader();
-      let accumulatedText = '';
   
-      while (true) {
-        const { done, value } = await reader!.read();
-        if (done) break;
-        const decodedChunk = new TextDecoder().decode(value);
-        accumulatedText += decodedChunk;
-      }
-  
-      const parsedResults = JSON.parse(accumulatedText);
-      const transformedResults = transformResults(parsedResults);
+      const responseData = await response.json();
+      console.log('Response data:', responseData);
       
+      const transformedResults = transformResults(responseData);
+  
       setResults(transformedResults);
       setIsAnalyzing(false);
       setAnalysisComplete(true);
       setShowResults(true);
-
+  
       // Only cache if it wasn't a cache hit
       if (cacheHit === 'false' && fileHash) {
         await fetch('/api/cache-response', {
@@ -139,17 +130,16 @@ const DocumentAnalysis = () => {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ fileHash, response: accumulatedText }),
+          body: JSON.stringify({ fileHash, response: JSON.stringify(responseData) }),
         });
       }
-      
+  
     } catch (error) {
       console.error('Error during analysis:', error);
       setIsAnalyzing(false);
       toast.error(`Something went wrong, please try again`);
     }
   };
-
 
   const transformResults = (rawResults: Record<string, SafeguardValue>): AnalysisResults => {
     console.log('Transforming raw results:', rawResults);
