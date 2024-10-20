@@ -8,9 +8,6 @@ const apiKey = process.env.GOOGLE_API_KEY;
 const mongoUri = process.env.MONGODB_URI;
 const genAI = new GoogleGenerativeAI(apiKey);
 
-
-
-
 const model = genAI.getGenerativeModel({
   model: "gemini-1.5-flash",
   systemInstruction: "You are a world-renowned expert in carbon credit evaluation and carbon removal verification. Your task is to assess the quality of carbon credit projects using the provided safeguard criteria.\n",
@@ -36,7 +33,6 @@ async function getMongoClient() {
   }
   return clientPromise;
 }
-
 // Generate hash for file content
 async function generateFileHash(file) {
   const arrayBuffer = await file.arrayBuffer();
@@ -44,6 +40,7 @@ async function generateFileHash(file) {
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
+
 
 // Check for cached response
 async function getCachedResponse(fileHash) {
@@ -87,12 +84,12 @@ async function processFileUpload(file) {
 
 export async function POST(req) {
   const formData = await req.formData();
-  const file = formData.get('files');
+  const files = formData.getAll('files');
   const standard = formData.get('standard');
 
-  if (!file || !standard) {
+  if (files.length === 0 || !standard) {
     return new Response(
-      JSON.stringify({ error: !file ? 'No file uploaded' : 'Standard not selected' }),
+      JSON.stringify({ error: files.length === 0 ? 'No files uploaded' : 'Standard not selected' }),
       { status: 400, headers: { 'Content-Type': 'application/json' } }
     );
   }
@@ -105,9 +102,10 @@ export async function POST(req) {
     );
   }
 
+
   try {
-    // Generate file hash for cache key
-    const fileHash = await generateFileHash(file);
+    // Generate file hash for cache key (using the first file for simplicity)
+    const fileHash = await generateFileHash(files[0]);
 
     // Check cache
     const cachedResponse = await getCachedResponse(fileHash);
@@ -121,8 +119,8 @@ export async function POST(req) {
       });
     }
 
-    // Process file if no cache hit
-    const processedFile = await processFileUpload(file);
+    // Process all files
+    const processedFiles = await Promise.all(files.map(processFileUpload));
 
     const prompt = `Using the provided rules in the ${DOCUMENT} file, the project will be evaluated based on the following criteria:
               
@@ -209,7 +207,7 @@ export async function POST(req) {
     // Initialize chat session with Gemini
 
     // Get response
-    const result = await model.generateContent(prompt, processedFile);
+    const result = await model.generateContent(prompt, processedFiles);
 
     // Extract the text content from the result
     let responseText = result.response.text();
