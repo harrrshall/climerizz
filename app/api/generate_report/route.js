@@ -239,7 +239,7 @@ export async function POST(req) {
 
         const result = await model.generateContent(prompt, processedFile);
         let responseText = result.response.text();
-        console.log(responseText);
+        // console.log(responseText);
     
         // Attempt to parse the response text as JSON
         let parsedResponse;
@@ -251,7 +251,7 @@ export async function POST(req) {
             try {
               responseText += "}";
               parsedResponse = JSON.parse(responseText);
-              console.log("JSON parsing successful after adding closing brace.");
+              // console.log("JSON parsing successful after adding closing brace.");
             } catch (secondError) {
               console.error("JSON parsing failed even after adding closing brace:", secondError);
               throw new Error("Unable to parse response as JSON");
