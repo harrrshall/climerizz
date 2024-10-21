@@ -7,11 +7,14 @@ import { AnimatePresence, motion } from 'framer-motion';
 import Link from 'next/link';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
+import AWS from 'aws-sdk';
 
 
 interface FileType {
   name: string;
   type: string;
+  s3Key?: string;
+  file?: File;
 }
 
 interface AnalysisResults {
@@ -56,14 +59,57 @@ const DocumentAnalysis = () => {
   const [expandedSafeguards, setExpandedSafeguards] = useState<string[]>([]);
   const [showResults, setShowResults] = useState(false);
   const [selectedStandard, setSelectedStandard] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+
+
+  AWS.config.update({
+    accessKeyId: process.env.NEXT_PUBLIC_AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.NEXT_PUBLIC_AWS_SECRET_ACCESS_KEY,
+    region: process.env.NEXT_PUBLIC_AWS_REGION
+  });
+  const s3 = new AWS.S3({
+    params: { Bucket: process.env.NEXT_PUBLIC_AWS_S3_BUCKET_NAME }
+  });
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const uploadedFiles = Array.from(event.target.files || []);
-    const validFiles = uploadedFiles.filter(file => file.type === 'application/pdf') as FileType[];
-    setFiles([...files, ...validFiles]);
+    const validFiles = uploadedFiles.filter(file => file.type === 'application/pdf');
+
+    const totalSize = validFiles.reduce((sum, file) => sum + file.size, 0);
+    const useS3 = totalSize > 4 * 1024 * 1024; // Check if total size > 4MB
+    if (useS3) {
+      setIsUploading(true);
+    }
+    const processedFiles = await Promise.all(validFiles.map(async file => {
+      if (useS3) {
+        const uploadResult = await uploadToS3(file);
+        return { name: file.name, type: file.type, s3Key: uploadResult.Key };
+      } else {
+        return { name: file.name, type: file.type, file: file };
+      }
+    }));
+    setIsUploading(false);
+    setFiles([...files, ...processedFiles]);
     setShowResults(false);
     setAnalysisComplete(false);
     setResults(null);
+  };
+
+  const uploadToS3 = async (file: File) => {
+    const params = {
+      Bucket: process.env.NEXT_PUBLIC_AWS_S3_BUCKET_NAME!,
+      Key: `uploads/${Date.now()}-${file.name}`,
+      Body: file
+    };
+
+    try {
+      const result = await s3.upload(params).promise();
+      return result;
+    } catch (error) {
+      console.error('Error uploading to S3:', error);
+      throw error;
+    }
   };
 
   const removeFile = (index: number) => {
@@ -88,41 +134,47 @@ const DocumentAnalysis = () => {
     console.log('Starting analysis');
     setIsAnalyzing(true);
     setShowResults(false);
-  
+
     if (files.length === 0 || !selectedStandard) {
       console.error('No files to analyze or standard not selected');
       setIsAnalyzing(false);
       toast.error('No files to analyze or standard not selected');
       return;
     }
-  
+
     try {
       const formData = new FormData();
-      files.forEach(file => formData.append('files', file as File));
+      files.forEach((file: FileType) => {
+        if (file.s3Key) {
+          formData.append('s3Keys', file.s3Key);
+        } else if (file.file) {
+          formData.append('files', file.file);
+        }
+      });
       formData.append('standard', selectedStandard);
-  
+
       const response = await fetch('/api/generate_report', {
         method: 'POST',
         body: formData,
       });
-  
+
       if (!response.ok) {
         throw new Error(`Network response was not ok: ${response.status} ${response.statusText}`);
       }
-  
+
       const fileHash = response.headers.get('X-File-Hash');
       const cacheHit = response.headers.get('X-Cache-Hit');
-  
+
       const responseData = await response.json();
       console.log('Response data:', responseData);
-      
+
       const transformedResults = transformResults(responseData);
-  
+
       setResults(transformedResults);
       setIsAnalyzing(false);
       setAnalysisComplete(true);
       setShowResults(true);
-  
+
       // Only cache if it wasn't a cache hit
       if (cacheHit === 'false' && fileHash) {
         await fetch('/api/cache-response', {
@@ -133,7 +185,7 @@ const DocumentAnalysis = () => {
           body: JSON.stringify({ fileHash, response: JSON.stringify(responseData) }),
         });
       }
-  
+
     } catch (error) {
       console.error('Error during analysis:', error);
       setIsAnalyzing(false);
@@ -149,23 +201,23 @@ const DocumentAnalysis = () => {
       recommendations: [],
       safeguards: []
     };
-  
+
     const processSafeguard = (key: string, value: SafeguardValue): SafeguardDetail | null => {
       if (typeof value !== 'object' || value === null) {
         console.warn(`Invalid safeguard data for ${key}:`, value);
         return null;
       }
-  
+
       const safeguard: SafeguardDetail = {
         name: key.replace(/_/g, ' '),
-        score: typeof value.Percentage === 'string' ? parseInt(value.Percentage) : 
-               typeof value.score === 'number' ? value.score : 0,
+        score: typeof value.Percentage === 'string' ? parseInt(value.Percentage) :
+          typeof value.score === 'number' ? value.score : 0,
         analysis: value.Analysis || value.analysis || '',
         justification: value.Justification || value.justification || '',
         positiveFindings: [],
         negativeFindings: []
       };
-  
+
       const findings = value.List_Specific_Findings || value.list_specific_findings;
       if (findings && typeof findings === 'object') {
         safeguard.positiveFindings = Array.isArray(findings.Positive)
@@ -175,10 +227,10 @@ const DocumentAnalysis = () => {
           ? findings.Negative.filter(Boolean)
           : findings.Negative ? [findings.Negative] : [];
       }
-  
+
       return safeguard;
     };
-  
+
     if (typeof rawResults === 'object' && rawResults !== null) {
       if (Array.isArray(rawResults)) {
         transformedResults.safeguards = rawResults
@@ -193,14 +245,14 @@ const DocumentAnalysis = () => {
           .map(([key, value]) => processSafeguard(key, value))
           .filter((safeguard): safeguard is SafeguardDetail => safeguard !== null);
       }
-  
-      transformedResults.safeguards = transformedResults.safeguards.filter(safeguard => 
-        safeguard.analysis || 
-        safeguard.justification || 
-        safeguard.positiveFindings.length > 0 || 
+
+      transformedResults.safeguards = transformedResults.safeguards.filter(safeguard =>
+        safeguard.analysis ||
+        safeguard.justification ||
+        safeguard.positiveFindings.length > 0 ||
         safeguard.negativeFindings.length > 0
       );
-  
+
       transformedResults.compliantStandards = transformedResults.safeguards
         .filter(safeguard => safeguard.score >= 80)
         .map(safeguard => safeguard.name);
@@ -208,7 +260,7 @@ const DocumentAnalysis = () => {
         .filter(safeguard => safeguard.score < 80)
         .map(safeguard => safeguard.name);
     }
-  
+
     return transformedResults;
   };
 
@@ -296,6 +348,7 @@ const DocumentAnalysis = () => {
                     onChange={handleFileUpload}
                     className="hidden"
                     id="file-upload"
+                    disabled={isUploading}
                   />
                   <label
                     htmlFor="file-upload"
@@ -389,10 +442,15 @@ const DocumentAnalysis = () => {
 
                 <Button
                   onClick={startAnalysis}
-                  disabled={files.length === 0 || !selectedStandard || isAnalyzing}
+                  disabled={files.length === 0 || !selectedStandard || isAnalyzing || isUploading}
                   className="w-full bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white py-6 rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {isAnalyzing ? (
+                  {isUploading ? (
+                    <div className="flex items-center justify-center gap-2">
+                      <Loader2 className="h-5 w-5 animate-spin" />
+                      <span>Uploading Files...</span>
+                    </div>
+                  ) : isAnalyzing ? (
                     <div className="flex items-center justify-center gap-2">
                       <Loader2 className="h-5 w-5 animate-spin" />
                       <span>Analyzing Documents...</span>
@@ -424,7 +482,7 @@ const DocumentAnalysis = () => {
                     <p className="text-lg">Upload your documents to see the analysis results</p>
                   </div>
                 )}
-                
+
                 {analysisComplete && results && (
                   <div className="space-y-6">
                     {results.safeguards.map((safeguard) => (
