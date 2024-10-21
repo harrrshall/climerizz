@@ -10,6 +10,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { ArrowRight, Heart, Share2 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
+import { Analytics } from "@vercel/analytics/react"
+
 
 const ClimerizzWebsite = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
@@ -904,6 +906,8 @@ const ClimerizzWebsite = () => {
           </div>
         </div>
       </footer>
+      <Analytics />
+
     </div>
   );
 };
