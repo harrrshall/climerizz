@@ -8,6 +8,7 @@ import Link from 'next/link';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import AWS from 'aws-sdk';
+import { Analytics } from "@vercel/analytics/react"
 
 
 interface FileType {
@@ -541,7 +542,9 @@ const DocumentAnalysis = () => {
         </div>
       </div>
       <ToastContainer />
+      <Analytics />
     </div>
+    
   );
 };
 
