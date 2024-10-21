@@ -3,13 +3,19 @@ import { VERRA } from './verra.js';
 import { GOLD_STANDARD_DOCUMENT } from './gold_standard.js';
 import { MongoClient } from 'mongodb';
 import crypto from 'crypto';
+import AWS from 'aws-sdk';
 
 const apiKey = process.env.GOOGLE_API_KEY;
 const mongoUri = process.env.MONGODB_URI;
 const genAI = new GoogleGenerativeAI(apiKey);
 
-
-
+// AWS S3 Configuration
+AWS.config.update({
+  accessKeyId: process.env.NEXT_PUBLIC_AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.NEXT_PUBLIC_AWS_SECRET_ACCESS_KEY,
+  region: process.env.NEXT_PUBLIC_AWS_REGION
+});
+const s3 = new AWS.S3();
 
 const model = genAI.getGenerativeModel({
   model: "gemini-1.5-flash",
@@ -22,7 +28,6 @@ const model = genAI.getGenerativeModel({
     responseMimeType: "application/json",
   }
 });
-
 
 
 // MongoDB connection management
@@ -38,9 +43,8 @@ async function getMongoClient() {
 }
 
 // Generate hash for file content
-async function generateFileHash(file) {
-  const arrayBuffer = await file.arrayBuffer();
-  const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+async function generateFileHash(fileContent) {
+  const hashBuffer = await crypto.subtle.digest('SHA-256', fileContent);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
@@ -72,7 +76,7 @@ async function getCachedResponse(fileHash) {
     return null;
   }
 }
-
+/* eslint-disable @typescript-eslint/no-unused-vars */
 // File processing function
 async function processFileUpload(file) {
   const fileContent = await file.arrayBuffer();
@@ -84,15 +88,26 @@ async function processFileUpload(file) {
     }
   };
 }
+// Function to get file content from S3
+async function getFileFromS3(s3Key) {
+  const params = {
+    Bucket: process.env.NEXT_PUBLIC_AWS_S3_BUCKET_NAME,
+    Key: s3Key
+  };
+
+  const data = await s3.getObject(params).promise();
+  return data.Body;
+}
 
 export async function POST(req) {
   const formData = await req.formData();
   const file = formData.get('files');
+  const s3Key = formData.get('s3Keys');
   const standard = formData.get('standard');
 
-  if (!file || !standard) {
+  if ((!file && !s3Key) || !standard) {
     return new Response(
-      JSON.stringify({ error: !file ? 'No file uploaded' : 'Standard not selected' }),
+      JSON.stringify({ error: !file && !s3Key ? 'No file uploaded' : 'Standard not selected' }),
       { status: 400, headers: { 'Content-Type': 'application/json' } }
     );
   }
@@ -106,8 +121,19 @@ export async function POST(req) {
   }
 
   try {
-    // Generate file hash for cache key
-    const fileHash = await generateFileHash(file);
+    let fileContent;
+    let fileHash;
+
+    if (s3Key) {
+      // Get file from S3
+      fileContent = await getFileFromS3(s3Key);
+      fileHash = await generateFileHash(fileContent);
+    } else {
+      // Process uploaded file
+      
+      fileContent = await file.arrayBuffer();
+      fileHash = await generateFileHash(fileContent);
+    }
 
     // Check cache
     const cachedResponse = await getCachedResponse(fileHash);
@@ -121,8 +147,13 @@ export async function POST(req) {
       });
     }
 
-    // Process file if no cache hit
-    const processedFile = await processFileUpload(file);
+    // Process file for Gemini
+    const processedFile = {
+      inlineData: {
+        data: Buffer.from(fileContent).toString('base64'),
+        mimeType: file ? file.type : 'application/pdf' // Assuming PDF for S3 files
+      }
+    };
 
     const prompt = `Using the provided rules in the ${DOCUMENT} file, the project will be evaluated based on the following criteria:
               
@@ -206,59 +237,51 @@ export async function POST(req) {
         
         DO NOT REPLY WITH ANYTHING ELSE BESIDES THIS, here is my document`
 
-    // Initialize chat session with Gemini
-
-    // Get response
-    const result = await model.generateContent(prompt, processedFile);
-
-    // Extract the text content from the result
-    let responseText = result.response.text();
-    console.log(responseText);
-
-
-    // Attempt to parse the response text as JSON
-    let parsedResponse;
-    try {
-      parsedResponse = JSON.parse(responseText);
-    } catch (error) {
-      // If parsing fails, try adding a closing brace and parse again
-      if (error instanceof SyntaxError) {
-        console.warn("Initial JSON parsing failed. Attempting to add closing brace.");
+        const result = await model.generateContent(prompt, processedFile);
+        let responseText = result.response.text();
+        console.log(responseText);
+    
+        // Attempt to parse the response text as JSON
+        let parsedResponse;
         try {
-          responseText += "}";
           parsedResponse = JSON.parse(responseText);
-          console.log("JSON parsing successful after adding closing brace.");
-        } catch (secondError) {
-          console.error("JSON parsing failed even after adding closing brace:", secondError);
-          throw new Error("Unable to parse response as JSON");
+        } catch (error) {
+          if (error instanceof SyntaxError) {
+            console.warn("Initial JSON parsing failed. Attempting to add closing brace.");
+            try {
+              responseText += "}";
+              parsedResponse = JSON.parse(responseText);
+              console.log("JSON parsing successful after adding closing brace.");
+            } catch (secondError) {
+              console.error("JSON parsing failed even after adding closing brace:", secondError);
+              throw new Error("Unable to parse response as JSON");
+            }
+          } else {
+            console.error("Unexpected error during JSON parsing:", error);
+            throw error;
+          }
         }
-      } else {
-        console.error("Unexpected error during JSON parsing:", error);
-        throw error;
+    
+        // Return the parsed response along with the fileHash
+        return new Response(JSON.stringify(parsedResponse), {
+          headers: {
+            'Content-Type': 'application/json; charset=utf-8',
+            'X-File-Hash': fileHash,
+            'X-Cache-Hit': 'false'
+          },
+        });
+    
+      } catch (error) {
+        console.error('Error in generate_report:', error);
+        return new Response(
+          JSON.stringify({
+            error: 'Internal server error',
+            details: error.message
+          }),
+          {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
       }
     }
-
-
-    // Return the parsed response along with the fileHash
-    return new Response(JSON.stringify(parsedResponse), {
-      headers: {
-        'Content-Type': 'application/json; charset=utf-8',
-        'X-File-Hash': fileHash,
-        'X-Cache-Hit': 'false'
-      },
-    });
-
-  } catch (error) {
-    console.error('Error in generate_report:', error);
-    return new Response(
-      JSON.stringify({
-        error: 'Internal server error',
-        details: error.message
-      }),
-      {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      }
-    );
-  }
-}
