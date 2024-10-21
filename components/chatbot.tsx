@@ -124,7 +124,25 @@ const DocumentAnalysis = () => {
         : [...prev, safeguardName]
     );
   };
-
+  const Disclaimer = () => (
+    <div className="mt-6 p-4 bg-gradient-to-r from-emerald-50 to-teal-50 rounded-lg border border-emerald-100">
+      <h4 className="font-semibold text-emerald-700 mb-2">Compliance Score Guide:</h4>
+      <ul className="space-y-2 text-sm">
+        <li className="flex items-center">
+          <span className="w-4 h-4 rounded-full bg-green-500 mr-2"></span>
+          <span><strong>80% – 100%</strong>: Strong, full compliance.</span>
+        </li>
+        <li className="flex items-center">
+          <span className="w-4 h-4 rounded-full bg-yellow-500 mr-2"></span>
+          <span><strong>50% – 79%</strong>: Moderate compliance with room for improvement.</span>
+        </li>
+        <li className="flex items-center">
+          <span className="w-4 h-4 rounded-full bg-red-500 mr-2"></span>
+          <span><strong>0% – 49%</strong>: Low compliance with significant issues.</span>
+        </li>
+      </ul>
+    </div>
+  );
   const getScoreColor = (score: number) => {
     if (score >= 80) return 'text-green-600 bg-green-50';
     if (score >= 60) return 'text-yellow-600 bg-yellow-50';
@@ -469,25 +487,25 @@ const DocumentAnalysis = () => {
           </Card>
 
           {showResults && (
-            <Card className="bg-white shadow-xl rounded-2xl overflow-hidden">
-              <CardHeader className="bg-gradient-to-r from-emerald-500 to-teal-500 p-8">
-                <CardTitle className="text-2xl font-bold text-white flex items-center gap-3">
-                  <CheckCircle className="h-6 w-6" />
-                  Analysis Results
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="p-8">
-                {!analysisComplete && (
-                  <div className="text-center text-gray-500 py-12">
-                    <AlertCircle className="h-12 w-12 mx-auto mb-4" />
-                    <p className="text-lg">Upload your documents to see the analysis results</p>
-                  </div>
-                )}
-
-                {analysisComplete && results && (
-                  <div className="space-y-6">
-                    {results.safeguards.map((safeguard) => (
-                      <div key={safeguard.name} className="border rounded-lg p-4">
+          <Card className="bg-white shadow-xl rounded-2xl overflow-hidden">
+            <CardHeader className="bg-gradient-to-r from-emerald-500 to-teal-500 p-8">
+              <CardTitle className="text-2xl font-bold text-white flex items-center gap-3">
+                <CheckCircle className="h-6 w-6" />
+                Analysis Results
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-8">
+              {!analysisComplete && (
+                <div className="text-center text-gray-500 py-12">
+                  <AlertCircle className="h-12 w-12 mx-auto mb-4" />
+                  <p className="text-lg">Upload your documents to see the analysis results</p>
+                </div>
+              )}
+              {analysisComplete && results && (
+                <div className="space-y-6">
+                  <Disclaimer />
+                  {results.safeguards.map((safeguard) => (
+                    <div key={safeguard.name} className="border rounded-lg p-4">
                         <button
                           onClick={() => toggleSafeguardExpansion(safeguard.name)}
                           className="w-full flex items-center justify-between"
