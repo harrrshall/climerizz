@@ -283,16 +283,18 @@ const ClimerizzWebsite = () => {
                   <span className="text-emerald-600 font-semibold">Trusted by Industry Leaders</span>
                 </div>
                 <h1 className="text-5xl md:text-6xl font-bold text-gray-800 leading-tight">
-                  Ensure Your Carbon Credits Meet{' '}
+                The Carbon Credits you buy are not just about 
+                {' '}
                   <span className="relative">
                     <span className="relative z-10 bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
-                      Social Safeguard Requirements
+                    carbon
                     </span>
                     <span className="absolute bottom-0 left-0 w-full h-3 bg-emerald-200 opacity-30 z-0"></span>
                   </span>
                 </h1>
                 <p className="text-xl text-gray-600 leading-relaxed max-w-2xl">
-                  Carbon projects often overlook their impact on local communities. Before investing in carbon credits,
+                Carbon project buyers often overlook the impact of each credit
+                on local communities. Before investing in carbon credits,
                   take the extra step to ensure compliance with social and environmental safeguards mandated by ICVCM
                   and local governments.
                 </p>
@@ -384,10 +386,15 @@ const ClimerizzWebsite = () => {
                 <span className="text-emerald-600 font-semibold">Our Expert Services</span>
               </div>
               <h2 className="text-4xl md:text-5xl font-bold mb-6 text-gray-800">
-                Ensure Social Safeguards in Your{' '}
+              Ensuring that you buy the                   <span className="relative z-10 bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
+              most impactful {' '}
+                  </span >
+                    and    <span className="relative z-10 bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
+              less harmful {' '}
+                  </span >
                 <span className="relative">
-                  <span className="relative z-10 bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
-                    Carbon Credit Projects
+                  <span className="text-4xl md:text-5xl font-bold mb-6 text-gray-800">
+                   Carbon Credit 
                   </span>
                   <span className="absolute bottom-0 left-0 w-full h-3 bg-emerald-200 opacity-30 z-0"></span>
                 </span>
